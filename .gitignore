@@ -51,3 +51,6 @@ Module.symvers
 Mkfile.old
 dkms.conf
 /.project
+/fant.log
+/filter_add_noise
+57353_g712_sub_10db.raw

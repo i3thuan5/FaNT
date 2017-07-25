@@ -1,0 +1,17 @@
+sudo: false
+language: c
+compiler:
+  - clang
+  - gcc
+branches:
+  only:
+  - master
+  - /\d+\.\d+\.\d+/
+env:
+- TSI3=test/parameter-8bits.sh
+- TSI3=test/parameter-16bits.sh
+install:
+- make -f filter_add_noise.make
+script:
+- echo bash -x $TSI3
+- bash -x $TSI3
