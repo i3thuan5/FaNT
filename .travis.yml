@@ -7,9 +7,11 @@ branches:
   only:
   - master
   - /\d+\.\d+\.\d+/
-script:
+env:
+- TSI3=test/parameter-8bits.sh
+- TSI3=test/parameter-16bits.sh
+install:
 - make -f filter_add_noise.make
-- ./filter_add_noise -i example/in.list -o example/out.list -n example/subway.raw -f g712 -s 10 -r 2000 -e fant.log
-- cmp example/57353_g712_sub_10db.raw test/8bits.raw
-- ./filter_add_noise -i example/in.list -o example/out.list -n example/subway.raw -u -s 10 -r 2000 -e fant.log
-- cmp example/57353_g712_sub_10db.raw test/16bits.raw
+script:
+- echo bash -x $TSI3
+- bash -x $TSI3
