@@ -137,7 +137,7 @@ int  main(int argc, char *argv[])
 {
 	PARAMETER	pars;
 	FILE       *fp_log, *fp_noise=NULL, *fp_list, *fp_outlist, *fp_index=NULL;
-	long        no_noise_samples=0;
+	long        no_noise_samples=0, i;
 	float      *noise=NULL, *noise_g712=NULL;
 	char        filename[300], out_filename[300];
 	
@@ -224,34 +224,80 @@ int  main(int argc, char *argv[])
 		}
 	}
 	fprintf(fp_log," ---------------------------------------------------------------------------\n");
+	fprintf(fp_log, "Processing started ...\n");
 
-	if ( (fp_list = fopen(pars.input_list, "r")) == NULL)
+	if ( pars.input_list == NULL)
+	{
+		if ( pars.output_list == NULL)
+		{
+			process_one_file(pars,NULL,NULL,
+	              no_noise_samples,noise,noise_g712,
+				fp_index,fp_log);
+		}
+		else if ( (fp_outlist = fopen(pars.output_list, "r")) == NULL)
+		{
+			fprintf(stderr, "\ncannot open list file %s\n", pars.output_list);
+			exit(-1);
+		}
+		else
+		{
+			if ( fscanf(fp_outlist, "%s", out_filename) == EOF)
+			{
+				fprintf(stderr, "\nInsufficient number of files defined in output list!\n");
+				exit(-1);
+			}
+			process_one_file(pars,NULL,out_filename,
+	              no_noise_samples,noise,noise_g712,
+				fp_index,fp_log);
+			fclose(fp_outlist);
+		}
+	}
+	else if ( (fp_list = fopen(pars.input_list, "r")) == NULL)
 	{
 		fprintf(stderr, "\ncannot open list file %s\n", pars.input_list);
 		exit(-1);
 	}
-	if ( (fp_outlist = fopen(pars.output_list, "r")) == NULL)
+	else
 	{
-		fprintf(stderr, "\ncannot open list file %s\n", pars.output_list);
-		exit(-1);
-	}
-	fprintf(stdout, "Processing started ...\n");
-	while ( fscanf(fp_list, "%s", filename) != EOF)
-	{
-		if ( fscanf(fp_outlist, "%s", out_filename) == EOF)
+		if ( pars.output_list == NULL)
 		{
-			fprintf(stderr, "\nInsufficient number of files defined in output list!\n");
+			for (i=0 ; fscanf(fp_list, "%s", filename) != EOF ; i++)
+			{
+				if ( i>0 )
+				{
+					fprintf(stderr, "\nThere are more than one file defined in output list!\n");
+					exit(-1);
+				}
+				process_one_file(pars,filename,NULL,
+		              no_noise_samples,noise,noise_g712,
+					fp_index,fp_log);
+			}
+		}
+		else if ( (fp_outlist = fopen(pars.output_list, "r")) == NULL)
+		{
+			fprintf(stderr, "\ncannot open list file %s\n", pars.output_list);
 			exit(-1);
 		}
-		process_one_file(pars,filename,out_filename,
-              no_noise_samples,noise,noise_g712,
-			fp_index,fp_log);
+		else
+		{
+			while ( fscanf(fp_list, "%s", filename) != EOF)
+			{
+				if ( fscanf(fp_outlist, "%s", out_filename) == EOF)
+				{
+					fprintf(stderr, "\nInsufficient number of files defined in output list!\n");
+					exit(-1);
+				}
+				process_one_file(pars,filename,out_filename,
+		              no_noise_samples,noise,noise_g712,
+					fp_index,fp_log);
+			}
+			fclose(fp_outlist);
+		}
+		fclose(fp_list);
 	}
 	
 	fprintf(fp_log," --------------------------------------------------------------------------\n\n");
 	fclose(fp_log);
-	fclose(fp_list);
-	fclose(fp_outlist);
 	if (pars.mode & ADD)
 	{
 		free(noise_g712);
@@ -381,16 +427,16 @@ void	anal_comline(PARAMETER *pars, int argc, char** argv)
 			print_usage(argv[0]);
 	   }
 	}
-	if (pars->input_list == NULL)
-	{
-		fprintf(stderr, "\n\n Input list is not defined.");
-		print_usage(argv[0]);
-	}
-	if (pars->output_list == NULL)
-	{
-		fprintf(stderr, "\n\n Output list is not defined.");
-		print_usage(argv[0]);
-	}
+	// if (pars->input_list == NULL)
+	// {
+	// 	fprintf(stderr, "\n\n Input list is not defined.");
+	// 	print_usage(argv[0]);
+	// }
+	// if (pars->output_list == NULL)
+	// {
+	// 	fprintf(stderr, "\n\n Output list is not defined.");
+	// 	print_usage(argv[0]);
+	// }
 	if ( (pars->mode & ADD) && (pars->snr == NONE) )
 	{
 		fprintf(stderr, "\n\n SNR not defined for noise adding.");
@@ -470,20 +516,20 @@ void	write_logfile(PARAMETER *pars, FILE *fp)
 	fprintf(fp," Input list file: %s\n", pars->input_list);
 	fprintf(fp," Output list file: %s\n", pars->output_list);
 	fprintf(fp," Log file: %s\n", pars->log_file);
-	fprintf(stdout,"Program started on: %s", ctime(&tt));
-	fprintf(stdout,"------------------------------------------------------\n");
-	fprintf(stdout," Input list file: %s\n", pars->input_list);
-	fprintf(stdout," Output list file: %s\n", pars->output_list);
-	fprintf(stdout," Log file: %s\n", pars->log_file);
+	// fprintf(stdout,"Program started on: %s", ctime(&tt));
+	// fprintf(stdout,"------------------------------------------------------\n");
+	// fprintf(stdout," Input list file: %s\n", pars->input_list);
+	// fprintf(stdout," Output list file: %s\n", pars->output_list);
+	// fprintf(stdout," Log file: %s\n", pars->log_file);
 	if (pars->mode & SAMP16K)
 	{
 		fprintf(fp," Processing of 16 kHz data\n");
-		fprintf(stdout," Processing of 16 kHz data\n");
+		// fprintf(stdout," Processing of 16 kHz data\n");
 	}
 	else
 	{
 		fprintf(fp," Processing of 8 kHz data\n");
-		fprintf(stdout," Processing of 8 kHz data\n");
+		// fprintf(stdout," Processing of 8 kHz data\n");
 	}
 	if (pars->mode & FILTER)
 	{
@@ -504,41 +550,41 @@ void	write_logfile(PARAMETER *pars, FILE *fp)
 			break;
 		}	
 		fprintf(fp," Filtering speech (& noise) with a %s characteristic\n", dum);
-		fprintf(stdout," Filtering speech (& noise) with a %s characteristic\n", dum);
+		// fprintf(stdout," Filtering speech (& noise) with a %s characteristic\n", dum);
 	}
 	if (pars->mode & NORM)
 	{
 		fprintf(fp," Trying to normalize speech level to %6.2f dB\n", pars->norm_level);
-		fprintf(stdout," Trying to normalize speech level to %6.2f dB\n", pars->norm_level);
+		// fprintf(stdout," Trying to normalize speech level to %6.2f dB\n", pars->norm_level);
 	}
 	if (pars->mode & ADD)
 	{
 		fprintf(fp," Adding noise file %s at a SNR of %6.2f dB\n", pars->noise_file, pars->snr);
-		fprintf(stdout," Adding noise file %s at a SNR of %6.2f dB\n", pars->noise_file, pars->snr);
+		// fprintf(stdout," Adding noise file %s at a SNR of %6.2f dB\n", pars->noise_file, pars->snr);
 		if (pars->mode & SNR_8khz)  /* FULL 8 kHz bandwidth  */
 		{
 		   fprintf(fp," Speech and noise level are calculated from the frequency range 0 to 8 kHz\n");
-		   fprintf(stdout," Speech and noise level are calculated from the frequency range 0 to 8 kHz\n");
+		   // fprintf(stdout," Speech and noise level are calculated from the frequency range 0 to 8 kHz\n");
 		}
 		else if (pars->mode & SNR_4khz)  /* FULL 8 kHz bandwidth  */
 		{
 		   fprintf(fp," Speech and noise level are calculated from the frequency range 0 to 4 kHz\n");
-		   fprintf(stdout," Speech and noise level are calculated from the frequency range 0 to 4 kHz\n");
+		   // fprintf(stdout," Speech and noise level are calculated from the frequency range 0 to 4 kHz\n");
 		}
 		else if (pars->mode & A_WEIGHT)  /* A weighting filter */
 		{
 		   fprintf(fp," Speech and noise level are calculated after A-weighting filtering\n");
-		   fprintf(stdout," Speech and noise level are calculated after A-weighting filtering\n");
+		   // fprintf(stdout," Speech and noise level are calculated after A-weighting filtering\n");
 		}
 		else   /* G.712  */
 		{
 		   fprintf(fp," Speech and noise level are calculated after G.712 filtering\n");
-		   fprintf(stdout," Speech and noise level are calculated after G.712 filtering\n");
+		   // fprintf(stdout," Speech and noise level are calculated after G.712 filtering\n");
 		}
 		if (pars->mode & DC_COMP)  /* DC compensation  */
 		{
 		   fprintf(fp," Speech and noise level are calculated from signals after DC compensation filtering\n");
-		   fprintf(stdout," Speech and noise level are calculated from signals after DC compensation filtering\n");
+		   // fprintf(stdout," Speech and noise level are calculated from signals after DC compensation filtering\n");
 		}
 	}
 }
@@ -588,7 +634,11 @@ void  write_samples(float *sig, long no_samples, char *name)
     FILE *fp;
 	short *buf;
 	
-	if ( (fp = fopen(name, "w")) == NULL)
+	if (name == NULL)
+	{
+		fp = stdout;
+	}
+	else if ( (fp = fopen(name, "w")) == NULL)
 	{
 		fprintf(stderr, "\ncannot open output file %s\n\n", name);
 		exit(-1);
@@ -719,7 +769,7 @@ void filter_samples(float *signal, long no_samples, int type)
 		break;
 	}
 	if (no != (no_samples+filter_shift))
-		fprintf(stdout, "Number of samples at output of filtering NOT equal to number of input samples!\n");
+		fprintf(stderr, "Number of samples at output of filtering NOT equal to number of input samples!\n");
 	memcpy(signal, &buf[filter_shift], (size_t)(no_samples*sizeof(float)));
 	free(buf);
 	free(signal_buf);
@@ -1072,7 +1122,11 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 	SVP56_state volt_state;
 	double      speech_level, noise_level, factor, fmax, snr;
 	int         count;
-		if ( (fp_speech = fopen(filename, "r")) == NULL)
+		if (filename == NULL)
+		{
+			fp_speech = stdin;
+		}
+		else if ( (fp_speech = fopen(filename, "r")) == NULL)
 		{
 			fprintf(stderr, "\ncannot open speech file %s\n", filename);
 			exit(-1);
@@ -1322,8 +1376,8 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 				speech[i] /= (float)fmax;
 			if (pars.mode & NORM)
 			{
-				fprintf(stdout, "ATTENTION !!!\n" );
-				fprintf(stdout, " Due to overload the speech level could only be normalized to %6.2f\n", pars.norm_level - 20*log10(fmax));
+				// fprintf(stdout, "ATTENTION !!!\n" );
+				// fprintf(stdout, " Due to overload the speech level could only be normalized to %6.2f\n", pars.norm_level - 20*log10(fmax));
 				fprintf(fp_log, "\n Due to overload the speech level could only be normalized to %6.2f", pars.norm_level - 20*log10(fmax));
 			}
 		} 
