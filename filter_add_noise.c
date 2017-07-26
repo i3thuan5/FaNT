@@ -121,8 +121,8 @@ typedef struct	{
 void anal_comline(PARAMETER*, int, char**);
 void print_usage(char*);
 void write_logfile(PARAMETER*, FILE*);
-long flen(FILE*);
-float* load_samples(FILE*, long);
+float* load_samples(FILE*, long *);
+short* load_short_samples(FILE *, long *);
 void filter_samples(float*, long, int);
 void write_samples(float*, long, char*);
 void DCOffsetFil(float*, long, int);
@@ -163,11 +163,16 @@ int  main(int argc, char *argv[])
 			fprintf(stderr, "\ncannot open noise file %s\n\n", pars.noise_file);
 			exit(-1);
 		}
-		no_noise_samples = flen(fp_noise)/2;
 		/* load samples of noise signal twice
 		   Buffer "noise_g712" only used for calculating noise level N  */
-		noise = load_samples(fp_noise, no_noise_samples);
-		noise_g712 = load_samples(fp_noise, no_noise_samples);
+		noise = load_samples(fp_noise, &no_noise_samples);
+		if ( ( noise_g712 = (float*)calloc((size_t)no_noise_samples, sizeof(float))) == NULL)
+		{
+			fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
+			exit(-1);
+		}
+		memcpy(noise_g712,noise,sizeof(float)*no_noise_samples);
+		
 		fprintf(fp_log, " %ld noise samples loaded from %s\n", no_noise_samples, pars.noise_file);
 		fclose(fp_noise);
 
@@ -589,44 +594,52 @@ void	write_logfile(PARAMETER *pars, FILE *fp)
 	}
 }
 
-	
-long  flen (FILE  *file)
+
+float *load_samples(FILE *fp, long *no_samples)
 {
-        long    pos;
-        long     len;
-
-        pos = ftell( file );      
-        fseek( file, 0, 2 );     
-        len = ftell(file);   
-		fseek( file, pos, 0 );    
-        return( len );
-}
-
-
-float *load_samples(FILE *fp, long no_samples)
-{
-    short *buf;
+     short *buf;
 	float *sig;
 	
-	if ( ( buf = (short*)calloc((size_t)no_samples, sizeof(short))) == NULL)
+	buf=load_short_samples(fp,no_samples);
+
+	if ( ( sig = (float*)calloc((size_t)*no_samples, sizeof(float))) == NULL)
 	{
 		fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
 		exit(-1);
 	}
-	if ( fread(buf, sizeof(short), (size_t)no_samples, fp) != no_samples )
-	{
-		fprintf(stderr, "could not read all samples!\n");
-		exit(-1);
-	}
-	rewind( fp );    
-	if ( ( sig = (float*)calloc((size_t)no_samples, sizeof(float))) == NULL)
-	{
-		fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
-		exit(-1);
-	}
-	sh2fl_16bit(no_samples, buf, sig, 1);
+	sh2fl_16bit(*no_samples, buf, sig, 1);
 	free(buf);
 	return(sig);
+}
+
+short *load_short_samples(FILE *fp, long *no_samples)
+{
+    short *buf;
+    size_t unit = 1048576, readed;
+    void *newPtr = NULL;
+    *no_samples=0;
+	
+	if ( ( buf = (short*)calloc((size_t)unit, sizeof(short))) == NULL)
+	{
+		fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
+		exit(-1);
+	}
+
+	while ( (readed = fread(buf+*no_samples, sizeof(short), (size_t)unit, fp)) != 0 )
+	{
+		*no_samples += readed;
+		unit += unit;
+
+		if ((newPtr = realloc(buf, (*no_samples + unit) * sizeof (short))) != NULL)
+		    buf = (short*) newPtr;
+		else
+		{
+			free(buf);
+			fprintf(stderr, "cannot reallocate enough memory to buffer samples!\n");
+			exit(-1);
+		}
+	}
+	return (short*)realloc(buf, (*no_samples + 1)*sizeof(short));
 }
 
 void  write_samples(float *sig, long no_samples, char *name)
@@ -1118,7 +1131,7 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 {
 	FILE        *fp_speech;
 	long       no_speech_samples, no, start, i;
-	float      *speech, *noise_buf;
+	float      *speech, *speech_two_pass, *noise_buf;
 	SVP56_state volt_state;
 	double      speech_level, noise_level, factor, fmax, snr;
 	int         count;
@@ -1133,8 +1146,14 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 		}
 
 		/* load samples of speech signal for calculating speech level S */
-		no_speech_samples = flen(fp_speech)/2;
-		speech = load_samples(fp_speech, no_speech_samples);
+		speech = load_samples(fp_speech, &no_speech_samples);
+		if ( ( speech_two_pass = (float*)calloc((size_t)no_speech_samples, sizeof(float))) == NULL)
+		{
+			fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
+			exit(-1);
+		}
+		memcpy(speech_two_pass,speech,sizeof(float)*no_speech_samples);
+
 		if (pars.mode & SAMP16K)  /*  16 kHz data  */
 		{
 		    if (pars.mode & SNR_4khz)  /*  full 4 kHz bandwidth for calculating speech level S  */
@@ -1178,19 +1197,19 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 			DCOffsetFil(speech, no_speech_samples, 8000);
 		    speech_level = speech_voltmeter(speech, no_speech_samples, &volt_state);
 		}
+		if (filename ==NULL)
+		{
+			fprintf(fp_log, " file:stdin  s-level:%6.2f  ", speech_level);
+		}
+		else
+		{
+			fprintf(fp_log, " file:%s  s-level:%6.2f  ", &filename[i+1], speech_level);
+		}
 
-		count = 0;
-		for (i= (strlen(filename) - 1); i>= 0; i--)
-			if (filename[i] == '/')
-			{
-				count++;
-				if (count == 2) break;
-			}
-		fprintf(fp_log, " file:%s  s-level:%6.2f  ", &filename[i+1], speech_level);
 		free(speech);
 
 		/* load samples of speech signal again */
-		speech = load_samples(fp_speech, no_speech_samples);
+		speech = speech_two_pass;
 
 		/* filter speech signal */
 		if (pars.mode & FILTER)

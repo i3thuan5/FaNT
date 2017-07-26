@@ -10,6 +10,7 @@ branches:
 env:
 - TSI3=test/parameter-8bits.sh
 - TSI3=test/parameter-16bits.sh
+- TSI3=test/pipeline-16bits.sh
 install:
 - make -f filter_add_noise.make
 script:
