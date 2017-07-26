@@ -127,19 +127,19 @@ void filter_samples(float*, long, int);
 void write_samples(float*, long, char*);
 void DCOffsetFil(float*, long, int);
 void AWeightFil(float*, long, int);
+void process_one_file(PARAMETER,char *,char *,
+     long,float *,float *,
+	FILE *,FILE *);
 
 /*=====================================================================*/
 
 int  main(int argc, char *argv[])
 {
 	PARAMETER	pars;
-	FILE       *fp_log, *fp_noise=NULL, *fp_list, *fp_speech, *fp_outlist, *fp_index=NULL;
-	long        no_noise_samples=0, no_speech_samples, no, start, i;
-	float      *noise=NULL, *noise_g712=NULL, *speech, *noise_buf;
+	FILE       *fp_log, *fp_noise=NULL, *fp_list, *fp_outlist, *fp_index=NULL;
+	long        no_noise_samples=0;
+	float      *noise=NULL, *noise_g712=NULL;
 	char        filename[300], out_filename[300];
-	SVP56_state volt_state;
-	double      speech_level, noise_level, factor, fmax, snr;
-	int         count;
 	
 	anal_comline(&pars, argc, argv);
 	if ( (fp_log = fopen(pars.log_file, "a")) == NULL)
@@ -243,266 +243,9 @@ int  main(int argc, char *argv[])
 			fprintf(stderr, "\nInsufficient number of files defined in output list!\n");
 			exit(-1);
 		}
-		if ( (fp_speech = fopen(filename, "r")) == NULL)
-		{
-			fprintf(stderr, "\ncannot open speech file %s\n", filename);
-			exit(-1);
-		}
-
-		/* load samples of speech signal for calculating speech level S */
-		no_speech_samples = flen(fp_speech)/2;
-		speech = load_samples(fp_speech, no_speech_samples);
-		if (pars.mode & SAMP16K)  /*  16 kHz data  */
-		{
-		    if (pars.mode & SNR_4khz)  /*  full 4 kHz bandwidth for calculating speech level S  */
-		    {
-			filter_samples(speech, no_speech_samples, DOWN);  /*  downsampling  16 --> 8 kHz  */
-		    }
-		    else if (pars.mode & A_WEIGHT)
-		    {
-		        AWeightFil(speech, no_speech_samples, 16000);
-		    }
-		    else if (pars.mode & SNR_8khz)
-		    {
-		    }
-		    else
-		    {
-		  	filter_samples(speech, no_speech_samples, G712_16K); /*  G.712 filtering of 16 K data  */
-		    }
-		    if (pars.mode & SNR_8khz)  /* FULL 8 kHz bandwidth */
-		    {
-			init_speech_voltmeter(&volt_state, 16000.);
-			if (pars.mode & DC_COMP)
-				DCOffsetFil(speech, no_speech_samples, 16000);
-		  	speech_level = speech_voltmeter(speech, no_speech_samples, &volt_state);
-		    }
-		    else
-		    {
-			init_speech_voltmeter(&volt_state, 8000.);
-			if ( (pars.mode & DC_COMP) && (!(pars.mode & A_WEIGHT)) )
-				DCOffsetFil(speech, no_speech_samples/2, 8000);
-		  	speech_level = speech_voltmeter(speech, no_speech_samples/2, &volt_state);
-		    }
-		}
-		else  /*  8 kHz data  */
-		{
-		    if (pars.mode & A_WEIGHT)  /* filtering with A-weighting curve */
-			AWeightFil(speech, no_speech_samples, 8000);
-		    else if (!(pars.mode & SNR_4khz))  /* If NOT full 4 kHz bandwidth --> G.712 filtering  */
-		  	filter_samples(speech, no_speech_samples, G712);
-		    init_speech_voltmeter(&volt_state, 8000.);
-		    if ( (pars.mode & DC_COMP) && (!(pars.mode & A_WEIGHT)) )
-			DCOffsetFil(speech, no_speech_samples, 8000);
-		    speech_level = speech_voltmeter(speech, no_speech_samples, &volt_state);
-		}
-
-		count = 0;
-		for (i= (strlen(filename) - 1); i>= 0; i--)
-			if (filename[i] == '/')
-			{
-				count++;
-				if (count == 2) break;
-			}
-		fprintf(fp_log, " file:%s  s-level:%6.2f  ", &filename[i+1], speech_level);
-		free(speech);
-
-		/* load samples of speech signal again */
-		speech = load_samples(fp_speech, no_speech_samples);
-
-		/* filter speech signal */
-		if (pars.mode & FILTER)
-		{
-		    filter_samples(speech, no_speech_samples, pars.filter_type);
-		}
-
-		/* normalize level of speech signal to desired level  */
-		if (pars.mode & NORM)
-		{
-			factor = pow(10., (pars.norm_level - speech_level)/20.);
-			scale(speech, no_speech_samples, factor);
-			speech_level = pars.norm_level;
-		}
-
-		if (pars.mode & ADD)  /*  Noise adding  */
-		{
-			if ( ( noise_buf = (float*)calloc((size_t)no_speech_samples, sizeof(float))) == NULL)
-			{
-				fprintf(stderr, "cannot allocate enough memory to buffer noise samples!\n");
-				exit(-1);
-			}
-			if (no_noise_samples > no_speech_samples)  /* noise signal longer than speech signal */
-			{
-				/* select segment randomly out of noise signal */
-				if (pars.mode & IND_LIST)
-				{
-				   if ( fscanf(fp_index, "%ld", &start) == EOF)
-				   {
-					fprintf(stderr, "\nInsufficient number of indices defined in index list file!\n");
-					exit(-1);
-				   }
-				}
-				else
-				   start = (long) ( (double)(rand())/(RAND_MAX) * (double)(no_noise_samples - no_speech_samples));
-
-				fprintf(fp_log, "1st noise sample:%ld  ", start);
-
-				/* calculate noise level of selected segment  */
-				if (pars.mode & SAMP16K)  /*  16 kHz data  */
-				{
-		    		    if (pars.mode & SNR_8khz)  /* calculate noise level from 16 kHz data  */
-		    		    {
-				  	memcpy(noise_buf, &noise_g712[start], (size_t)(no_speech_samples*sizeof(float)));
-					init_speech_voltmeter(&volt_state, 16000.);
-				  	speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
-		    		    }
-		    		    else  /* calculate noise level from downsampled 8 kHz data  */
-		    		    {
-				  	memcpy(noise_buf, &noise_g712[start/2], (size_t)(no_speech_samples/2*sizeof(float)));
-					init_speech_voltmeter(&volt_state, 8000.);
-				  	speech_voltmeter(noise_buf, no_speech_samples/2, &volt_state);
-				    }
-				}
-				else  /*  8 kHz data  */
-				{
-				   memcpy(noise_buf, &noise_g712[start], (size_t)(no_speech_samples*sizeof(float)));
-				   init_speech_voltmeter(&volt_state, 8000.);
-				   speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
-				}
-
-				noise_level = SVP56_get_rms_dB(volt_state);
-				fprintf(fp_log, "n-level:%6.2f", noise_level);
-				memcpy(noise_buf, &noise[start], (size_t)(no_speech_samples*sizeof(float)));
-			}
-			else /* speech signal longer than noise signal */
-			     /* use noise signal several times by starting with the 1st sample again at the end  */
-			{
-				no = 0;
-				if (pars.mode & SAMP16K)  /*  16 kHz data  */
-				{
-				  if (pars.mode & SNR_8khz)  /* FULL 8 kHz bandwidth  */
-				  {
-				     while (no < no_speech_samples)
-				     {
-					if ((no_speech_samples-no) > no_noise_samples)
-					{
-						memcpy(&noise_buf[no], noise_g712,(size_t)(no_noise_samples*sizeof(float)));
-						no += no_noise_samples;
-					}
-					else
-					{
-						memcpy(&noise_buf[no], noise_g712,(size_t)((no_speech_samples-no)*sizeof(float)));
-						no = no_speech_samples;
-					}
-				     }
-				     init_speech_voltmeter(&volt_state, 16000.);
-				     speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
-				  }
-				  else  /* in case of 4 kHz bandwidth with or without G.712 filtering  */
-				        /* process downsampled version of noise signal */
-				  {
-				    while (no < no_speech_samples/2)
-				    {
-					if ((no_speech_samples/2-no) > no_noise_samples/2)
-					{
-						memcpy(&noise_buf[no], noise_g712,(size_t)(no_noise_samples/2*sizeof(float)));
-						no += no_noise_samples/2;
-					}
-					else
-					{
-						memcpy(&noise_buf[no], noise_g712,(size_t)((no_speech_samples/2-no)*sizeof(float)));
-						no = no_speech_samples/2;
-					}
-				    }
-				    init_speech_voltmeter(&volt_state, 8000.);
-				    speech_voltmeter(noise_buf, no_speech_samples/2, &volt_state);
-				  }
-				}
-				else  /*  8 kHz data  */
-				{
-				  while (no < no_speech_samples)
-				  {
-					if ((no_speech_samples-no) > no_noise_samples)
-					{
-						memcpy(&noise_buf[no], noise_g712,(size_t)(no_noise_samples*sizeof(float)));
-						no += no_noise_samples;
-					}
-					else
-					{
-						memcpy(&noise_buf[no], noise_g712,(size_t)((no_speech_samples-no)*sizeof(float)));
-						no = no_speech_samples;
-					}
-				  }
-				  init_speech_voltmeter(&volt_state, 8000.);
-				  speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
-				}
-
-				noise_level = SVP56_get_rms_dB(volt_state);
-				fprintf(fp_log, "noise too short! n-level:%6.2f", noise_level);
-				no = 0;
-				while (no < no_speech_samples)
-				{
-					if ((no_speech_samples-no) > no_noise_samples)
-					{
-						memcpy(&noise_buf[no], noise, (size_t)(no_noise_samples*sizeof(float)));
-						no += no_noise_samples;
-					}
-					else
-					{
-						memcpy(&noise_buf[no], noise, (size_t)((no_speech_samples-no)*sizeof(float)));
-						no = no_speech_samples;
-					}
-				}
-			}
-			if (pars.mode & SNRANGE)
-			{ 
-			  snr = (double)pars.snr + ( (double)(rand())/(double)(RAND_MAX) * (double)(pars.snr_range) );	
-			  fprintf(fp_log, "  SNR:%f", snr);
-			}
-			else
-			  snr = pars.snr;
-			factor = pow(10., ((speech_level - snr) - noise_level)/20.);
-			scale(noise_buf, no_speech_samples, factor);
-			/*fmax = 0.; */
-			for (i=0; i<no_speech_samples; i++)
-			{
-				speech[i] += noise_buf[i];
-				/*if (fabs((double)speech[i]) > fmax)
-					fmax = fabs((double)speech[i]);*/
-			}
-			/*if (fmax > 1.)
-			{
-				fprintf(fp_log, "\n ATTENTION!!! overload: %6.2f", fmax);
-				for (i=0; i<no_speech_samples; i++)
-					speech[i] /= (float)fmax;
-			} */
-			
-			free(noise_buf);
-		}
-		/* The overload check has been moved here!
-		   Now the check is also done in case of a level normalization only! */
-		fmax = 0.;
-		for (i=0; i<no_speech_samples; i++)
-		{
-			if (fabs((double)speech[i]) > fmax)
-				fmax = fabs((double)speech[i]);  
-		}
-		if (fmax > 1.)
-		{
-			fprintf(fp_log, "\n ATTENTION!!! overload by factor %6.2f", fmax);
-			for (i=0; i<no_speech_samples; i++)
-				speech[i] /= (float)fmax;
-			if (pars.mode & NORM)
-			{
-				fprintf(stdout, "ATTENTION !!!\n" );
-				fprintf(stdout, " Due to overload the speech level could only be normalized to %6.2f\n", pars.norm_level - 20*log10(fmax));
-				fprintf(fp_log, "\n Due to overload the speech level could only be normalized to %6.2f", pars.norm_level - 20*log10(fmax));
-			}
-		} 
-		
-		write_samples(speech, no_speech_samples, out_filename);
-		free(speech);
-		fclose(fp_speech);
-		fprintf(fp_log, "\n");
+		process_one_file(pars,filename,out_filename,
+              no_noise_samples,noise,noise_g712,
+			fp_index,fp_log);
 	}
 	
 	fprintf(fp_log," --------------------------------------------------------------------------\n\n");
@@ -1319,3 +1062,274 @@ double b_16[301] = {  \
   free(buf);
 }
 
+void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
+	long no_noise_samples,float *noise,float *noise_g712,
+	FILE *fp_index,FILE *fp_log)
+{
+	FILE        *fp_speech;
+	long       no_speech_samples, no, start, i;
+	float      *speech, *noise_buf;
+	SVP56_state volt_state;
+	double      speech_level, noise_level, factor, fmax, snr;
+	int         count;
+		if ( (fp_speech = fopen(filename, "r")) == NULL)
+		{
+			fprintf(stderr, "\ncannot open speech file %s\n", filename);
+			exit(-1);
+		}
+
+		/* load samples of speech signal for calculating speech level S */
+		no_speech_samples = flen(fp_speech)/2;
+		speech = load_samples(fp_speech, no_speech_samples);
+		if (pars.mode & SAMP16K)  /*  16 kHz data  */
+		{
+		    if (pars.mode & SNR_4khz)  /*  full 4 kHz bandwidth for calculating speech level S  */
+		    {
+			filter_samples(speech, no_speech_samples, DOWN);  /*  downsampling  16 --> 8 kHz  */
+		    }
+		    else if (pars.mode & A_WEIGHT)
+		    {
+		        AWeightFil(speech, no_speech_samples, 16000);
+		    }
+		    else if (pars.mode & SNR_8khz)
+		    {
+		    }
+		    else
+		    {
+		  	filter_samples(speech, no_speech_samples, G712_16K); /*  G.712 filtering of 16 K data  */
+		    }
+		    if (pars.mode & SNR_8khz)  /* FULL 8 kHz bandwidth */
+		    {
+			init_speech_voltmeter(&volt_state, 16000.);
+			if (pars.mode & DC_COMP)
+				DCOffsetFil(speech, no_speech_samples, 16000);
+		  	speech_level = speech_voltmeter(speech, no_speech_samples, &volt_state);
+		    }
+		    else
+		    {
+			init_speech_voltmeter(&volt_state, 8000.);
+			if ( (pars.mode & DC_COMP) && (!(pars.mode & A_WEIGHT)) )
+				DCOffsetFil(speech, no_speech_samples/2, 8000);
+		  	speech_level = speech_voltmeter(speech, no_speech_samples/2, &volt_state);
+		    }
+		}
+		else  /*  8 kHz data  */
+		{
+		    if (pars.mode & A_WEIGHT)  /* filtering with A-weighting curve */
+			AWeightFil(speech, no_speech_samples, 8000);
+		    else if (!(pars.mode & SNR_4khz))  /* If NOT full 4 kHz bandwidth --> G.712 filtering  */
+		  	filter_samples(speech, no_speech_samples, G712);
+		    init_speech_voltmeter(&volt_state, 8000.);
+		    if ( (pars.mode & DC_COMP) && (!(pars.mode & A_WEIGHT)) )
+			DCOffsetFil(speech, no_speech_samples, 8000);
+		    speech_level = speech_voltmeter(speech, no_speech_samples, &volt_state);
+		}
+
+		count = 0;
+		for (i= (strlen(filename) - 1); i>= 0; i--)
+			if (filename[i] == '/')
+			{
+				count++;
+				if (count == 2) break;
+			}
+		fprintf(fp_log, " file:%s  s-level:%6.2f  ", &filename[i+1], speech_level);
+		free(speech);
+
+		/* load samples of speech signal again */
+		speech = load_samples(fp_speech, no_speech_samples);
+
+		/* filter speech signal */
+		if (pars.mode & FILTER)
+		{
+		    filter_samples(speech, no_speech_samples, pars.filter_type);
+		}
+
+		/* normalize level of speech signal to desired level  */
+		if (pars.mode & NORM)
+		{
+			factor = pow(10., (pars.norm_level - speech_level)/20.);
+			scale(speech, no_speech_samples, factor);
+			speech_level = pars.norm_level;
+		}
+
+		if (pars.mode & ADD)  /*  Noise adding  */
+		{
+			if ( ( noise_buf = (float*)calloc((size_t)no_speech_samples, sizeof(float))) == NULL)
+			{
+				fprintf(stderr, "cannot allocate enough memory to buffer noise samples!\n");
+				exit(-1);
+			}
+			if (no_noise_samples > no_speech_samples)  /* noise signal longer than speech signal */
+			{
+				/* select segment randomly out of noise signal */
+				if (pars.mode & IND_LIST)
+				{
+				   if ( fscanf(fp_index, "%ld", &start) == EOF)
+				   {
+					fprintf(stderr, "\nInsufficient number of indices defined in index list file!\n");
+					exit(-1);
+				   }
+				}
+				else
+				   start = (long) ( (double)(rand())/(RAND_MAX) * (double)(no_noise_samples - no_speech_samples));
+
+				fprintf(fp_log, "1st noise sample:%ld  ", start);
+
+				/* calculate noise level of selected segment  */
+				if (pars.mode & SAMP16K)  /*  16 kHz data  */
+				{
+		    		    if (pars.mode & SNR_8khz)  /* calculate noise level from 16 kHz data  */
+		    		    {
+				  	memcpy(noise_buf, &noise_g712[start], (size_t)(no_speech_samples*sizeof(float)));
+					init_speech_voltmeter(&volt_state, 16000.);
+				  	speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
+		    		    }
+		    		    else  /* calculate noise level from downsampled 8 kHz data  */
+		    		    {
+				  	memcpy(noise_buf, &noise_g712[start/2], (size_t)(no_speech_samples/2*sizeof(float)));
+					init_speech_voltmeter(&volt_state, 8000.);
+				  	speech_voltmeter(noise_buf, no_speech_samples/2, &volt_state);
+				    }
+				}
+				else  /*  8 kHz data  */
+				{
+				   memcpy(noise_buf, &noise_g712[start], (size_t)(no_speech_samples*sizeof(float)));
+				   init_speech_voltmeter(&volt_state, 8000.);
+				   speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
+				}
+
+				noise_level = SVP56_get_rms_dB(volt_state);
+				fprintf(fp_log, "n-level:%6.2f", noise_level);
+				memcpy(noise_buf, &noise[start], (size_t)(no_speech_samples*sizeof(float)));
+			}
+			else /* speech signal longer than noise signal */
+			     /* use noise signal several times by starting with the 1st sample again at the end  */
+			{
+				no = 0;
+				if (pars.mode & SAMP16K)  /*  16 kHz data  */
+				{
+				  if (pars.mode & SNR_8khz)  /* FULL 8 kHz bandwidth  */
+				  {
+				     while (no < no_speech_samples)
+				     {
+					if ((no_speech_samples-no) > no_noise_samples)
+					{
+						memcpy(&noise_buf[no], noise_g712,(size_t)(no_noise_samples*sizeof(float)));
+						no += no_noise_samples;
+					}
+					else
+					{
+						memcpy(&noise_buf[no], noise_g712,(size_t)((no_speech_samples-no)*sizeof(float)));
+						no = no_speech_samples;
+					}
+				     }
+				     init_speech_voltmeter(&volt_state, 16000.);
+				     speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
+				  }
+				  else  /* in case of 4 kHz bandwidth with or without G.712 filtering  */
+				        /* process downsampled version of noise signal */
+				  {
+				    while (no < no_speech_samples/2)
+				    {
+					if ((no_speech_samples/2-no) > no_noise_samples/2)
+					{
+						memcpy(&noise_buf[no], noise_g712,(size_t)(no_noise_samples/2*sizeof(float)));
+						no += no_noise_samples/2;
+					}
+					else
+					{
+						memcpy(&noise_buf[no], noise_g712,(size_t)((no_speech_samples/2-no)*sizeof(float)));
+						no = no_speech_samples/2;
+					}
+				    }
+				    init_speech_voltmeter(&volt_state, 8000.);
+				    speech_voltmeter(noise_buf, no_speech_samples/2, &volt_state);
+				  }
+				}
+				else  /*  8 kHz data  */
+				{
+				  while (no < no_speech_samples)
+				  {
+					if ((no_speech_samples-no) > no_noise_samples)
+					{
+						memcpy(&noise_buf[no], noise_g712,(size_t)(no_noise_samples*sizeof(float)));
+						no += no_noise_samples;
+					}
+					else
+					{
+						memcpy(&noise_buf[no], noise_g712,(size_t)((no_speech_samples-no)*sizeof(float)));
+						no = no_speech_samples;
+					}
+				  }
+				  init_speech_voltmeter(&volt_state, 8000.);
+				  speech_voltmeter(noise_buf, no_speech_samples, &volt_state);
+				}
+
+				noise_level = SVP56_get_rms_dB(volt_state);
+				fprintf(fp_log, "noise too short! n-level:%6.2f", noise_level);
+				no = 0;
+				while (no < no_speech_samples)
+				{
+					if ((no_speech_samples-no) > no_noise_samples)
+					{
+						memcpy(&noise_buf[no], noise, (size_t)(no_noise_samples*sizeof(float)));
+						no += no_noise_samples;
+					}
+					else
+					{
+						memcpy(&noise_buf[no], noise, (size_t)((no_speech_samples-no)*sizeof(float)));
+						no = no_speech_samples;
+					}
+				}
+			}
+			if (pars.mode & SNRANGE)
+			{ 
+			  snr = (double)pars.snr + ( (double)(rand())/(double)(RAND_MAX) * (double)(pars.snr_range) );	
+			  fprintf(fp_log, "  SNR:%f", snr);
+			}
+			else
+			  snr = pars.snr;
+			factor = pow(10., ((speech_level - snr) - noise_level)/20.);
+			scale(noise_buf, no_speech_samples, factor);
+			/*fmax = 0.; */
+			for (i=0; i<no_speech_samples; i++)
+			{
+				speech[i] += noise_buf[i];
+				/*if (fabs((double)speech[i]) > fmax)
+					fmax = fabs((double)speech[i]);*/
+			}
+			/*if (fmax > 1.)
+			{
+				fprintf(fp_log, "\n ATTENTION!!! overload: %6.2f", fmax);
+				for (i=0; i<no_speech_samples; i++)
+					speech[i] /= (float)fmax;
+			} */
+			
+			free(noise_buf);
+		}
+		/* The overload check has been moved here!
+		   Now the check is also done in case of a level normalization only! */
+		fmax = 0.;
+		for (i=0; i<no_speech_samples; i++)
+		{
+			if (fabs((double)speech[i]) > fmax)
+				fmax = fabs((double)speech[i]);  
+		}
+		if (fmax > 1.)
+		{
+			fprintf(fp_log, "\n ATTENTION!!! overload by factor %6.2f", fmax);
+			for (i=0; i<no_speech_samples; i++)
+				speech[i] /= (float)fmax;
+			if (pars.mode & NORM)
+			{
+				fprintf(stdout, "ATTENTION !!!\n" );
+				fprintf(stdout, " Due to overload the speech level could only be normalized to %6.2f\n", pars.norm_level - 20*log10(fmax));
+				fprintf(fp_log, "\n Due to overload the speech level could only be normalized to %6.2f", pars.norm_level - 20*log10(fmax));
+			}
+		} 
+		
+		write_samples(speech, no_speech_samples, out_filename);
+		free(speech);
+		fclose(fp_speech);
+		fprintf(fp_log, "\n");
+}
