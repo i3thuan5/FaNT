@@ -30,7 +30,7 @@
 *                         - S and N are calculated after applying G.712 filtering to
 *                           speech and noise (default). This mode has also been used
 *                           for creating the noisy Aurora data.
-*                         
+*
 *                         The program expects a list file as input containing
 *                         all speech files to be processed. Furthermore a list file
 *                         of same length is needed that defines the file names
@@ -45,7 +45,7 @@
 *
 *      Rev  Date       Name            Description
 *      -------------------------------------------------------------------
-*      p1a  30-11-99   G. Hirsch       basic version 
+*      p1a  30-11-99   G. Hirsch       basic version
 *      p2a  11-05-01   G. Hirsch       extended for 16 kHz data by introducing
 *                                      the filter mode p341_16k
 *      p3a  19-11-04   G. Hirsch       different filtering methods applicable for
@@ -55,7 +55,7 @@
 *      p4a  17-12-04   G. Hirsch       A-weighting filtering added
 *      p5a  17-12-04   G. Hirsch       bug removed for the case of filtering 16 kHz
 *                                      data with a P.341 characteristic
-*      p6a  09-06-10   G. Hirsch       overflow check also in case of level normalization 
+*      p6a  09-06-10   G. Hirsch       overflow check also in case of level normalization
 *                                      only (suggested by D. Gelbart and J.I. Biel)
 *
 ********************************************************************************
@@ -80,6 +80,9 @@ const char module_id[] = "@(#)$Id: $";
 #include "iirflt.h"
 #include "firflt.h"
 #include "sv-p56.h"
+
+#define DR_WAV_IMPLEMENTATION
+#include "dr_wav.h"
 
 #define NONE   9999
 #define FILTER 0x1
@@ -140,7 +143,7 @@ int  main(int argc, char *argv[])
 	long        no_noise_samples=0, i;
 	float      *noise=NULL, *noise_g712=NULL;
 	char        filename[300], out_filename[300];
-	
+
 	anal_comline(&pars, argc, argv);
 	if ( (fp_log = fopen(pars.log_file, "a")) == NULL)
 	{
@@ -158,23 +161,53 @@ int  main(int argc, char *argv[])
 				exit(-1);
 			}
 		}
-		if ( (fp_noise = fopen(pars.noise_file, "r")) == NULL)
+		if ( strstr(pars.noise_file, ".wav") )
 		{
-			fprintf(stderr, "\ncannot open noise file %s\n\n", pars.noise_file);
-			exit(-1);
+			unsigned int channels;
+	    unsigned int sampleRate;
+	    drwav_uint64 totalPCMFrameCount;
+			noise = drwav_open_file_and_read_pcm_frames_f32(pars.noise_file, &channels, &sampleRate, &totalPCMFrameCount, NULL);
+	    if (noise == NULL)
+			{
+				fprintf(stderr, "\ncannot open noise file %s\n\n", pars.noise_file);
+				exit(-1);
+	    }
+			if (channels != 1)
+			{
+				fprintf(stderr, "\nnoise file must be mono %s\n\n", pars.noise_file);
+				exit(-1);
+			}
+			if ((pars.mode & SAMP16K) && sampleRate != 16000)
+			{
+				fprintf(stderr, "\nsample rate must be 16000 %s\n\n", pars.noise_file);
+				exit(-1);
+			}
+			else
+			{
+				fprintf(stderr, "\nsample rate must be 8000 %s\n\n", pars.noise_file);
+				exit(-1);
+			}
 		}
-		/* load samples of noise signal twice
-		   Buffer "noise_g712" only used for calculating noise level N  */
-		noise = load_samples(fp_noise, &no_noise_samples);
-		if ( ( noise_g712 = (float*)calloc((size_t)no_noise_samples, sizeof(float))) == NULL)
-		{
-			fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
-			exit(-1);
+		else {
+			if ( (fp_noise = fopen(pars.noise_file, "r")) == NULL)
+			{
+				fprintf(stderr, "\ncannot open noise file %s\n\n", pars.noise_file);
+				exit(-1);
+			}
+			/* load samples of noise signal twice
+			   Buffer "noise_g712" only used for calculating noise level N  */
+			noise = load_samples(fp_noise, &no_noise_samples);
+			if ( ( noise_g712 = (float*)calloc((size_t)no_noise_samples, sizeof(float))) == NULL)
+			{
+				fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
+				exit(-1);
+			}
+			fclose(fp_noise);
 		}
+
 		memcpy(noise_g712,noise,sizeof(float)*no_noise_samples);
-		
+
 		fprintf(fp_log, " %ld noise samples loaded from %s\n", no_noise_samples, pars.noise_file);
-		fclose(fp_noise);
 
 		/* filter noise signal in buffer "noise_g712" */
 		if (pars.mode & SAMP16K)  /*  16 kHz data  */
@@ -300,7 +333,7 @@ int  main(int argc, char *argv[])
 		}
 		fclose(fp_list);
 	}
-	
+
 	fprintf(fp_log," --------------------------------------------------------------------------\n\n");
 	fclose(fp_log);
 	if (pars.mode & ADD)
@@ -315,7 +348,7 @@ int  main(int argc, char *argv[])
 
 
 /*=====================================================================*/
-					
+
 void	anal_comline(PARAMETER *pars, int argc, char** argv)
 {
 	int c;
@@ -514,7 +547,7 @@ void	write_logfile(PARAMETER *pars, FILE *fp)
 {
     char *dum;
 	time_t tt;
-	
+
 	tt = time(NULL);
 	fprintf(fp,"Program started on: %s", ctime(&tt));
 	fprintf(fp,"------------------------------------------------------\n");
@@ -553,7 +586,7 @@ void	write_logfile(PARAMETER *pars, FILE *fp)
 		  case P341_16K:
 			dum = "P341";
 			break;
-		}	
+		}
 		fprintf(fp," Filtering speech (& noise) with a %s characteristic\n", dum);
 		// fprintf(stdout," Filtering speech (& noise) with a %s characteristic\n", dum);
 	}
@@ -599,7 +632,7 @@ float *load_samples(FILE *fp, long *no_samples)
 {
      short *buf;
 	float *sig;
-	
+
 	buf=load_short_samples(fp,no_samples);
 
 	if ( ( sig = (float*)calloc((size_t)*no_samples, sizeof(float))) == NULL)
@@ -618,7 +651,7 @@ short *load_short_samples(FILE *fp, long *no_samples)
     size_t unit = 1048576, readed;
     void *newPtr = NULL;
     *no_samples=0;
-	
+
 	if ( ( buf = (short*)calloc((size_t)unit, sizeof(short))) == NULL)
 	{
 		fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
@@ -646,7 +679,7 @@ void  write_samples(float *sig, long no_samples, char *name)
 {
     FILE *fp;
 	short *buf;
-	
+
 	if (name == NULL)
 	{
 		fp = stdout;
@@ -656,7 +689,7 @@ void  write_samples(float *sig, long no_samples, char *name)
 		fprintf(stderr, "\ncannot open output file %s\n\n", name);
 		exit(-1);
 	}
-	
+
 	if ( ( buf = (short*)calloc((size_t)no_samples, sizeof(short))) == NULL)
 	{
 		fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
@@ -678,7 +711,7 @@ void filter_samples(float *signal, long no_samples, int type)
 	SCD_FIR     *p341_state, *irs_state, *mirs_state, *up_ptr, *down_ptr;
 	float  *buf, *buf1, *buf2, *signal_buf;
 	long    no=0, filter_shift=0;
-	
+
     switch(type)
 	{
 	  case G712:
@@ -698,7 +731,7 @@ void filter_samples(float *signal, long no_samples, int type)
 		filter_shift = P341_16K_FILTER_SHIFT;
 		break;
 	}
-	
+
 	if ( ( buf = (float*)calloc((size_t)(no_samples+filter_shift), sizeof(float))) == NULL)
 	{
 		fprintf(stderr, "cannot allocate enough memory to filter samples!\n");
@@ -1356,8 +1389,8 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 				}
 			}
 			if (pars.mode & SNRANGE)
-			{ 
-			  snr = (double)pars.snr + ( (double)(rand())/(double)(RAND_MAX) * (double)(pars.snr_range) );	
+			{
+			  snr = (double)pars.snr + ( (double)(rand())/(double)(RAND_MAX) * (double)(pars.snr_range) );
 			  fprintf(fp_log, "  SNR:%f", snr);
 			}
 			else
@@ -1377,7 +1410,7 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 				for (i=0; i<no_speech_samples; i++)
 					speech[i] /= (float)fmax;
 			} */
-			
+
 			free(noise_buf);
 		}
 		/* The overload check has been moved here!
@@ -1386,7 +1419,7 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 		for (i=0; i<no_speech_samples; i++)
 		{
 			if (fabs((double)speech[i]) > fmax)
-				fmax = fabs((double)speech[i]);  
+				fmax = fabs((double)speech[i]);
 		}
 		if (fmax > 1.)
 		{
@@ -1399,10 +1432,38 @@ void process_one_file(PARAMETER	pars,char *filename,char *out_filename,
 				// fprintf(stdout, " Due to overload the speech level could only be normalized to %6.2f\n", pars.norm_level - 20*log10(fmax));
 				fprintf(fp_log, "\n Due to overload the speech level could only be normalized to %6.2f", pars.norm_level - 20*log10(fmax));
 			}
-		} 
-		
-		write_samples(speech, no_speech_samples, out_filename);
+		}
+
+		if ( strstr(out_filename, ".wav") )
+		{
+			drwav dwav;
+			drwav_data_format format;
+			format.container = drwav_container_riff;     // <-- drwav_container_riff = normal WAV files, drwav_container_w64 = Sony Wave64.
+			format.format = DR_WAVE_FORMAT_PCM;          // <-- Any of the DR_WAVE_FORMAT_* codes.
+			format.channels = 1;
+			format.sampleRate = (pars.mode & SAMP16K) ? 16000 : 8000;
+			format.bitsPerSample = 16;
+			drwav_init_file_write(&dwav, out_filename, &format, NULL);
+			short *buf;
+			if ( ( buf = (short*)calloc((size_t)no_speech_samples, sizeof(short))) == NULL)
+			{
+				fprintf(stderr, "cannot allocate enough memory to buffer samples!\n");
+				exit(-1);
+			}
+			fl2sh_16bit(no_speech_samples, speech, buf, 1);
+			drwav_write_pcm_frames(&dwav, no_speech_samples, buf);
+			drwav_uninit(&dwav);
+			free(buf);
+		}
+		else
+		{
+			write_samples(speech, no_speech_samples, out_filename);
+			fclose(fp_speech);
+		}
+
+
+
+
 		free(speech);
-		fclose(fp_speech);
 		fprintf(fp_log, "\n");
 }
